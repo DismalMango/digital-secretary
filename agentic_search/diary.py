@@ -1,8 +1,9 @@
-from indexing import *
 from pathlib import Path
-import os
-from nanobot.utils.helpers import ensure_dir, today_date
 from threading import Lock
+
+from agentic_search.indexing import *
+from nanobot.utils.helpers import ensure_dir
+
 
 class DiaryStore:
     def __init__(self, workspace: Path):
@@ -11,16 +12,16 @@ class DiaryStore:
         self.chroma_db = ChromaDB()
         self.lock = Lock()
         self.build_index()
-        
+
     def query(self, query: str, n_results: int = 2) -> list[str]:
         return self.retriever.hybrid_query(query, n_results)
-    
+
     def get_all_markdown_texts(self) -> list[str]:
         return [doc.read_text(encoding="utf-8") for doc in self.diary_dir.glob("*.md")]
-    
+
     def convert_docs_to_corpus(self) -> None:
         self.corpus = self.chunker.chunk_markdown_texts(self.all_markdown_texts)
-        
+
     def build_index(self) -> None:
         self.all_markdown_texts = self.get_all_markdown_texts()
         self.convert_docs_to_corpus()

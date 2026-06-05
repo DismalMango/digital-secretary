@@ -5,14 +5,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any, cast
 
+import chromadb
 import jieba
+from langchain_core.documents import Document
+from langchain_text_splitters import MarkdownTextSplitter
 from openai import OpenAI
 from rank_bm25 import BM25Okapi
 
-import chromadb
-
-from langchain_text_splitters import MarkdownTextSplitter
-from langchain_core.documents import Document
 
 class Chunker:
     def __init__(self, chunk_size=80, chunk_overlap=10) -> None:
@@ -21,22 +20,24 @@ class Chunker:
             chunk_overlap=chunk_overlap,
         )
         self.lock = Lock()
-    
+
     def chunk_markdown_texts(self, markdown_texts: list[str]) -> list[Document]:
         chunk_list: list[Document] = []
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(self.splitter.create_documents, [markdown_text]): markdown_text for markdown_text in markdown_texts}
+            futures = {
+                executor.submit(self.splitter.create_documents, [markdown_text]): markdown_text
+                for markdown_text in markdown_texts
+            }
             for future in as_completed(futures):
                 docs = future.result()
                 for doc in docs:
                     self._safe_append(doc, chunk_list)
         return chunk_list
-    
+
     def _safe_append(self, text: Document, chunk_list: list[Document]) -> None:
         with self.lock:
             chunk_list.append(text)
-    
-    
+
 
 class Vectorizer:
     def __init__(
@@ -160,9 +161,9 @@ class Retriever:
         bm25 = self._get_or_build_bm25(doc_ids, documents)
         query_tokens = jieba.lcut_for_search(query)
         scores = bm25.get_scores(query_tokens)
-        ranked_indices = sorted(
-            range(len(scores)), key=lambda i: scores[i], reverse=True
-        )[:n_results]
+        ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[
+            :n_results
+        ]
         return [doc_ids[i] for i in ranked_indices]
 
     def reciprocal_rank_fusion(self, rankings: list[list[str]], k: int = 60) -> list[str]:
