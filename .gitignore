@@ -4,3 +4,4 @@ diary/
 .venv/
 __pycache__/
 docs/
+chroma_db/
