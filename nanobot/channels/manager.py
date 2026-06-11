@@ -9,6 +9,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.channels.feishu import FeishuSecretaryChannel
 
 
 class ChannelManager:
@@ -31,6 +32,11 @@ class ChannelManager:
 
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
+
+        # Feishu channel
+        if self.config.channels.feishu.enabled:
+            self.channels["feishu"] = FeishuSecretaryChannel(self.config.channels.feishu, self.bus)
+            logger.info("Feishu channel enabled")
 
         # Telegram channel
         if self.config.channels.telegram.enabled:

@@ -5,6 +5,8 @@
 import subprocess
 from pathlib import Path
 
+from loguru import logger
+
 from feishu_bridge.bridge import AllChatListener
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -36,7 +38,22 @@ class FeishuSecretaryChannel(BaseChannel):
         await self.all_chat_listener.listen()
 
     async def send(self, msg: OutboundMessage) -> None:
-        subprocess.run(["lark-cli", "im", "+messages-send", "--as", "user", "--chat-id", msg.chat_id, "--text", msg.content])
+        logger.info(f"Sending message to feishu chat_id={msg.chat_id}: {msg.content}")
+        result = subprocess.run(
+            [
+                "lark-cli",
+                "im",
+                "+messages-send",
+                "--as",
+                "user",
+                "--chat-id",
+                msg.chat_id,
+                "--text",
+                msg.content,
+            ]
+        )
+        if result.returncode != 0:
+            logger.error(f"Failed to send message to feishu chat_id={msg.chat_id}: {result.stderr}")
 
     async def stop(self) -> None:
         self.all_chat_listener.stop()
