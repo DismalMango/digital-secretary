@@ -1,6 +1,5 @@
-# from chromadb.api.types import Document
+import hashlib
 import os
-import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any, cast
@@ -14,7 +13,7 @@ from rank_bm25 import BM25Okapi
 
 
 class Chunker:
-    def __init__(self, chunk_size=80, chunk_overlap=10) -> None:
+    def __init__(self, chunk_size=100, chunk_overlap=10) -> None:
         self.splitter = MarkdownTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -76,7 +75,7 @@ class Vectorizer:
 
     def get_bm25(self, corpus: list[str]) -> BM25Okapi:
         """
-        基于整个语料做分词并构建 BM25 索引。
+        get BM25 index for the corpus
         """
         tokenized_corpus = [jieba.lcut_for_search(text) for text in corpus]
         return BM25Okapi(tokenized_corpus)
@@ -93,10 +92,17 @@ class ChromaDB:
         self.collection = self.client.get_or_create_collection(name=collection_name)
         self.vectorizer = vectorizer or Vectorizer(corpus=[])
 
+    def clear(self) -> None:
+        records = self.collection.get()
+        ids = cast(list[str], records.get("ids") or [])
+        if ids:
+            self.collection.delete(ids=ids)
+
     def _make_doc_id(self, doc: Document, idx: int) -> str:
         metadata = doc.metadata or {}
         source = str(metadata.get("source", "unknown"))
-        return f"{source}:{idx}:{uuid.uuid4().hex}"
+        digest = hashlib.sha256(f"{source}\0{idx}\0{doc.page_content}".encode("utf-8")).hexdigest()
+        return f"{source}:{idx}:{digest[:16]}"
 
     def add_documents(self, documents: list[Document]) -> None:
         if not documents:
