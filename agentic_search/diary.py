@@ -28,9 +28,16 @@ class DiaryStore:
 
     def _get_top_chunks_from_reranker(self, user_query, chunk_list, n=5):
         model = self.reranker
+        if model is None:
+            return [(user_query, chunk) for chunk in chunk_list[:n]]
+
         pairs = [(user_query, chunk) for chunk in chunk_list]
-        scores = model.compute_score(pairs)
-        if scores:
+        try:
+            scores = model.compute_score(pairs)
+        except Exception:
+            return [(user_query, chunk) for chunk in chunk_list[:n]]
+
+        if len(scores) > 0:
             scores_with_pairs = list(zip(scores, pairs))
             scores_with_pairs.sort(key=lambda x: x[0], reverse=True)
             return [pair[1] for pair in scores_with_pairs[:n]]

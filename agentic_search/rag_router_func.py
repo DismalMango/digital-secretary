@@ -1,8 +1,12 @@
+from functools import lru_cache
+
 from langchain_core.prompts import PromptTemplate
 from langchain_litellm import ChatLiteLLM
 from pydantic import BaseModel, Field
 
 from agentic_search.rag_state import GraphState
+from nanobot.config.loader import load_config
+from nanobot.providers.litellm_provider import LiteLLMProvider
 
 # Instantiation using from_template (recommended)
 prompt = PromptTemplate.from_template(
@@ -42,12 +46,21 @@ class RagDecision(BaseModel):
     reason: str
 
 
-llm = ChatLiteLLM(model="openai/gpt-5-nano")
-llm_with_structured_output = llm.with_structured_output(RagDecision)
+@lru_cache(maxsize=1)
+def get_router_llm():
+    config = load_config()
+    api_key = config.get_api_key()
+    api_base = config.get_api_base()
+    llm_provider = LiteLLMProvider(api_key=api_key, api_base=api_base)
+    llm = ChatLiteLLM(model=llm_provider.get_default_model())
+    return llm.with_structured_output(RagDecision)
 
 
 def needs_rag(state: GraphState) -> bool:
     user_message = state["user_query"]
-    raw_response = llm_with_structured_output.invoke(prompt.format(user_message=user_message))
-    response = RagDecision.model_validate(raw_response)
-    return response.needs_rag
+    try:
+        raw_response = get_router_llm().invoke(prompt.format(user_message=user_message))
+        response = RagDecision.model_validate(raw_response)
+        return response.needs_rag
+    except Exception:
+        return True
