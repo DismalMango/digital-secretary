@@ -8,6 +8,7 @@ import chromadb
 import jieba
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownTextSplitter
+from loguru import logger
 from openai import OpenAI
 from rank_bm25 import BM25Okapi
 
@@ -48,17 +49,19 @@ class Vectorizer:
         client: OpenAI | None = None,
     ) -> None:
         self.model = model
-        self.client = client or OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        self.client = client or OpenAI(api_key=os.environ.get("OPENAI_API_KEY"), timeout=30.0)
         self.corpus = corpus or []
 
     def get_dense_vector(self, text: str) -> list[float]:
         """
         Generates a vector embedding for the provided text using OpenAI's API.
         """
+        logger.info(f"Embedding single text with model={self.model}, chars={len(text)}")
         response = self.client.embeddings.create(
             model=self.model,
             input=text,
         )
+        logger.info(f"Finished embedding single text with model={self.model}")
         return response.data[0].embedding
 
     def get_dense_vectors(self, texts: list[str], batch_size: int = 64) -> list[list[float]]:
@@ -68,11 +71,19 @@ class Vectorizer:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), batch_size):
             batch = texts[start : start + batch_size]
+            logger.info(
+                f"Embedding batch with model={self.model}, "
+                f"batch_start={start}, batch_size={len(batch)}, total={len(texts)}"
+            )
             response = self.client.embeddings.create(
                 model=self.model,
                 input=batch,
             )
             vectors.extend(item.embedding for item in response.data)
+            logger.info(
+                f"Finished embedding batch with model={self.model}, "
+                f"batch_start={start}, batch_size={len(batch)}, total={len(texts)}"
+            )
         return vectors
 
     def get_bm25(self, corpus: list[str]) -> BM25Okapi:
