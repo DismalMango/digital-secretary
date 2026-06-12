@@ -11,7 +11,6 @@ from loguru import logger
 
 from nanobot.bus import MessageBus
 from nanobot.bus.events import InboundMessage
-from nanobot.utils.helpers import conver_time
 
 
 @dataclass
@@ -130,20 +129,32 @@ class ChatListener:
         self.workspace = workspace
         self.message_bus = message_bus
         self.start_time = start_time
-        self._latest_message_id = None
+        self._latest_message_id: str | None = None
+        self._latest_message_position: int | None = None
         self._new_messages = []
         self.last_activity_at = start_time
 
-    async def _read_latest_message_id_from_cache(self) -> str | None:
+    @staticmethod
+    def _message_position(message: dict[str, Any]) -> int | None:
+        position = message.get("message_position")
+        if position is None:
+            return None
+        try:
+            return int(position)
+        except (TypeError, ValueError):
+            return None
+
+    async def _read_latest_message_cursor_from_cache(self) -> tuple[str | None, int | None]:
         cache_path = self.workspace / "feishu_cache" / f"{self.chat_id}.jsonl"
         try:
             async with aiofiles.open(cache_path, "r") as f:
                 lines = await f.readlines()
                 if lines:
-                    return json.loads(lines[-1])["message_id"]
+                    message = json.loads(lines[-1])
+                    return message["message_id"], self._message_position(message)
         except Exception:
             pass
-        return None
+        return None, None
 
     async def write_cache(self, messages: list[dict[str, Any]]) -> None:
         if not messages:
@@ -169,7 +180,7 @@ class ChatListener:
             "--format",
             "json",
             "--sort",
-            "asc",
+            "desc",
             "--jq",
             ".data.messages",
             stdout=asyncio.subprocess.PIPE,
@@ -200,18 +211,24 @@ class ChatListener:
             return
         # The subprocess has exited and both pipes have been drained.
         if not self._latest_message_id:
-            self._latest_message_id = await self._read_latest_message_id_from_cache()
+            (
+                self._latest_message_id,
+                self._latest_message_position,
+            ) = await self._read_latest_message_cursor_from_cache()
 
         if not json_data:
             return
 
-        # --sort asc returns oldest messages first, so the newest message is last.
-        latest_msg_id = json_data[-1]["message_id"]
+        # lark-cli returns the newest messages first with --sort desc; process them oldest first.
+        json_data = list(reversed(json_data))
+        latest_message = json_data[-1]
+        latest_msg_id = latest_message["message_id"]
+        latest_msg_position = self._message_position(latest_message)
 
-        # Ignore historical messages that were created before the agent started.
         # A missing cursor means this chat has not been recorded yet.
         if not self._latest_message_id:
             self._latest_message_id = latest_msg_id
+            self._latest_message_position = latest_msg_position
             return
 
         if self._latest_message_id == latest_msg_id:
@@ -223,15 +240,18 @@ class ChatListener:
             if message["message_id"] == self._latest_message_id:
                 past_cursor = True
                 continue
+            message_position = self._message_position(message)
+            is_after_cursor = past_cursor or (
+                self._latest_message_position is not None
+                and message_position is not None
+                and message_position > self._latest_message_position
+            )
+            if not is_after_cursor:
+                continue
             if message["sender"]["id"] == self.user_id:
                 continue
-            if past_cursor and conver_time(message["create_time"]) > self.start_time:
-                logger.info(f"New message from feishu chat_id={self.chat_id}: {message}")
-                new_messages.append(message)
-
-        if not past_cursor:
-            self._latest_message_id = latest_msg_id
-            return
+            logger.info(f"New message from feishu chat_id={self.chat_id}: {message}")
+            new_messages.append(message)
 
         if new_messages:
             self._new_messages.extend(new_messages)
@@ -243,7 +263,8 @@ class ChatListener:
                     )
                 )
             await self.write_cache(new_messages)
-            self._latest_message_id = latest_msg_id
+        self._latest_message_id = latest_msg_id
+        self._latest_message_position = latest_msg_position
 
 
 class AllChatListener:
