@@ -244,6 +244,9 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
     console.print("[green]✓[/green] Heartbeat: every 30m")
+    console.print("[cyan]Warming up RAG store...[/cyan]")
+    agent.warmup()
+    console.print("[green]✓[/green] RAG store ready")
 
     async def run():
         try:

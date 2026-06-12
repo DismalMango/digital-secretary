@@ -131,6 +131,7 @@ class ChatListener:
         self.start_time = start_time
         self._latest_message_id: str | None = None
         self._latest_message_position: int | None = None
+        self._bootstrapped = False
         self._new_messages = []
         self.last_activity_at = start_time
 
@@ -143,18 +144,6 @@ class ChatListener:
             return int(position)
         except (TypeError, ValueError):
             return None
-
-    async def _read_latest_message_cursor_from_cache(self) -> tuple[str | None, int | None]:
-        cache_path = self.workspace / "feishu_cache" / f"{self.chat_id}.jsonl"
-        try:
-            async with aiofiles.open(cache_path, "r") as f:
-                lines = await f.readlines()
-                if lines:
-                    message = json.loads(lines[-1])
-                    return message["message_id"], self._message_position(message)
-        except Exception:
-            pass
-        return None, None
 
     async def write_cache(self, messages: list[dict[str, Any]]) -> None:
         if not messages:
@@ -209,13 +198,6 @@ class ChatListener:
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode chat messages JSON for chat_id={self.chat_id}: {e}")
             return
-        # The subprocess has exited and both pipes have been drained.
-        if not self._latest_message_id:
-            (
-                self._latest_message_id,
-                self._latest_message_position,
-            ) = await self._read_latest_message_cursor_from_cache()
-
         if not json_data:
             return
 
@@ -225,10 +207,12 @@ class ChatListener:
         latest_msg_id = latest_message["message_id"]
         latest_msg_position = self._message_position(latest_message)
 
-        # A missing cursor means this chat has not been recorded yet.
-        if not self._latest_message_id:
+        # On startup, treat the current latest message as the baseline and ignore older messages.
+        if not self._bootstrapped:
             self._latest_message_id = latest_msg_id
             self._latest_message_position = latest_msg_position
+            await self.write_cache([latest_message])
+            self._bootstrapped = True
             return
 
         if self._latest_message_id == latest_msg_id:
@@ -334,10 +318,7 @@ class AllChatListener:
     async def _poll_chat_listener(self, chat_id: str, listener: ChatListener) -> None:
         async with self._chat_poll_semaphore:
             try:
-                await asyncio.wait_for(
-                    listener.listen(command_timeout=self.chat_poll_timeout),
-                    timeout=self.chat_poll_timeout,
-                )
+                await listener.listen(command_timeout=self.chat_poll_timeout)
             except asyncio.TimeoutError:
                 logger.warning(
                     f"Timed out polling chat listener for chat_id={chat_id} "

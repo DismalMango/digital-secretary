@@ -70,8 +70,15 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
 
         # Message tool
-        message_tool = MessageTool(send_callback=self.bus.publish_outbound)
-        self.tools.register(message_tool)
+        # message_tool = MessageTool(send_callback=self.bus.publish_outbound)
+        # self.tools.register(message_tool)
+
+    def warmup(self) -> None:
+        """Initialize expensive dependencies before the first inbound message."""
+        from agentic_search.rag_node import get_diary_store
+
+        logger.info("Warming up RAG diary store")
+        get_diary_store()
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
